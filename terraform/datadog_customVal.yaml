@@ -1,0 +1,35 @@
+datadog:
+  site: datadoghq.eu
+  logs:
+    enabled: true
+    containerCollectAll: true
+  clusterName: tech-assessment-cluster
+  collectEvents: true
+  hostVolumeMountPropagation: HostToContainer
+
+clusterAgent:
+  metricsProvider:
+    enabled: true
+
+networkMonitoring:
+  enabled: true
+
+systemProbe:
+  enableTCPQueueLength: true
+  enableOOMKill: true
+
+securityAgent:
+  runtime:
+    enabled: true
+
+agents:
+  tolerations:
+    - key: karpenter.sh/controller
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+clusterTagger:
+  collectKubernetesTags: true
+
+kubeStateMetricsEnabled: true
