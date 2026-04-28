@@ -42,4 +42,4 @@ to private network.
 ## Timeline
 There were lots of small steps involved in performing this task for example:
 - IaC setup (backend, IAM roles etc), spinning up EKS cluster, Installing and setting up karpenter keeping scalablity and high availability in mind,
-creating a helmchart for the application, configuring values, packaging and hosting the helmchart to deploy it in automated way, installing and configuring datadog agents and adding alerts and dashboard in datadog and documenting the provided solution . All these steps combined took me approximately 16 hours overall.  
+creating a helmchart for the application, configuring values, packaging and hosting the helmchart to deploy it in automated way, installing and configuring datadog agents and adding alerts and dashboard in datadog and documenting the provided solution . 
