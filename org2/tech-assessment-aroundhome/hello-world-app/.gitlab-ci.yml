@@ -1,0 +1,118 @@
+stages:
+  - build
+
+variables:
+  ECR_APP_REPO_URL: 841602633529.dkr.ecr.eu-central-1.amazonaws.com/app
+  ROLE_ARN: arn:aws:iam::841602633529:role/GitLabCI20241201212831395300000007
+
+
+.aws-prep: &aws-prep
+  - | 
+    mkdir -p ~/.aws
+    echo "${ECR_OIDC}" > /tmp/web_identity_token
+    echo -e "[profile oidc]\nrole_arn=${ROLE_ARN}\nweb_identity_token_file=/tmp/web_identity_token" > ~/.aws/config
+
+.build-push-ecr:
+  image: docker:latest
+  stage: build
+  services:
+    - docker:dind
+  id_tokens:
+    ECR_OIDC:
+      aud: https://gitlab.com
+  before_script:
+    - *aws-prep
+    - apk add --no-cache aws-cli
+    - aws ecr get-login-password --profile "oidc" --region "eu-central-1" | docker login --username AWS --password-stdin $ECR_APP_REPO_URL
+  script:
+    - |
+      IMAGE_TAG="$(echo $CI_COMMIT_SHA | head -c 8)"
+      cd app
+      echo "Building image..."
+      docker build -t $ECR_APP_REPO_URL:latest .
+      echo "Tagging image..."
+      docker tag $ECR_APP_REPO_URL:latest $ECR_APP_REPO_URL:$IMAGE_TAG
+      echo "Pushing image..."
+      docker push $ECR_APP_REPO_URL:latest
+      docker push $ECR_APP_REPO_URL:$IMAGE_TAG
+      echo "$IMAGE_TAG" > imagetag
+  artifacts:
+    paths:
+      - app/imagetag
+
+build-push-app:
+  stage: build
+  extends: .build-push-ecr
+  rules:
+    - changes:
+        - app/**
+      # if: $CI_COMMIT_BRANCH == "main"  
+
+.package-and-push:
+  stage: build
+  image: 
+    name: alpine/helm:latest
+    entrypoint: [""] 
+  id_tokens:
+    ECR_OIDC:
+      aud: https://gitlab.com
+  before_script:
+    - *aws-prep
+    - apk add --no-cache aws-cli
+    - aws ecr get-login-password --profile "oidc" --region "eu-central-1" | helm registry login --username AWS --password-stdin 841602633529.dkr.ecr.eu-central-1.amazonaws.com/helmcharts
+  script:
+    - |
+      helm package helmchart/
+      CHART=$(ls helloworld-*.*.*.tgz | head -n 1)
+      helm push $CHART oci://841602633529.dkr.ecr.eu-central-1.amazonaws.com
+
+package-and-push:
+  stage: build
+  extends: .package-and-push
+  rules:
+    - changes:
+      - helmchart/**
+    - changes:
+      - .gitignore
+      when: never
+
+
+update-helm-values:
+  stage: build
+  image: 
+    name: alpine/git
+    entrypoint: [""] 
+  needs:
+    - job: build-push-app
+      artifacts: true  
+  before_script:
+    - apk add --no-cache yq
+    - git clone "https://${GITLAB_USERNAME}:${GITLAB_API_ACCESS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "${CI_COMMIT_SHA}"
+
+    # Set the displayed user with the commits that are about to be made
+    - git config --global user.email "$GITLAB_USER_EMAIL}"
+    - git config --global user.name "$GITLAB_USER_NAME}"
+    - echo "$GITLAB_USER_NAME}"
+    - echo "$GITLAB_USER_EMAIL}"
+    - export IMAGE_TAG=$(cat app/imagetag)
+    - echo $IMAGE_TAG  
+  script:
+    - cd "${CI_COMMIT_SHA}"
+    - echo "Updating image tag in helmchart/values.yaml"
+    - yq eval ".image.tag = \"${IMAGE_TAG}\"" -i helmchart/values.yaml
+    - echo "Updated helmchart/values.yaml:"
+    - cat helmchart/values.yaml
+
+    # Bump the chart version in Chart.yaml
+    - echo "Bumping chart version in helmchart/Chart.yaml"
+    - yq eval '.version |= (. | split(".") | [.[0], .[1], (.[2] | tonumber + 1)] | join("."))' -i helmchart/Chart.yaml
+    - echo "Updated helmchart/Chart.yaml"
+    - cat helmchart/Chart.yaml
+
+   
+    - git add helmchart/values.yaml helmchart/Chart.yaml
+    - git commit -m "Update Helm chart version and image tag with image tag"
+    - git push origin "${CI_DEFAULT_BRANCH}"  
+  rules:
+  - changes:
+      - app/**
